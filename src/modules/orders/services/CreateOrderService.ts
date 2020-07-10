@@ -39,20 +39,54 @@ class CreateOrderService {
 
     const productsId = products.map(product => ({ id: product.id }));
 
-    const findProducts = await this.productsRepository.findAllById(productsId);
+    const productsStocked = await this.productsRepository.findAllById(
+      productsId,
+    );
 
-    const createProducts = findProducts.map(item => ({
-      product_id: item.id,
-      price: item.price,
-      quantity: item.quantity,
-    }));
+    if (productsStocked.length < products.length) {
+      throw new AppError('Some product is not available.');
+    }
+
+    const productsToOrder = products.map(productToOrder => {
+      const productStocked = productsStocked.find(
+        item => item.id === productToOrder.id,
+      );
+
+      if (!productStocked) {
+        throw new AppError('Product is not available.');
+      }
+
+      if (productToOrder.quantity > productStocked?.quantity) {
+        throw new AppError(
+          `${productStocked?.name} has insufficient quantity.`,
+        );
+      }
+
+      return {
+        product_id: productStocked.id,
+        price: productStocked.price,
+        quantity: productToOrder.quantity,
+      };
+    });
 
     const order = await this.ordersRepository.create({
       customer,
-      products: createProducts,
+      products: productsToOrder,
     });
 
-    return order;
+    const productsNewQuantity = products.map(product => {
+      const findProduct = productsStocked.find(item => item.id === product.id);
+      return {
+        id: product.id,
+        quantity: findProduct ? findProduct.quantity - product.quantity : 0,
+      };
+    });
+
+    await this.productsRepository.updateQuantity(productsNewQuantity);
+
+    delete order.customer_id;
+
+    return { ...order, customer };
   }
 }
 
